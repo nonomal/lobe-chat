@@ -1,16 +1,9 @@
-import { SessionProvider } from 'next-auth/react';
-import { PropsWithChildren } from 'react';
+import { type PropsWithChildren } from 'react';
 
-import { getServerConfig } from '@/config/server';
-import { API_ENDPOINTS } from '@/services/_url';
-
-const { ENABLE_OAUTH_SSO = false } = getServerConfig();
-
-const AuthProvider = ({ children }: PropsWithChildren) =>
-  ENABLE_OAUTH_SSO ? (
-    <SessionProvider basePath={API_ENDPOINTS.oauth}>{children}</SessionProvider>
-  ) : (
-    children
-  );
+// Next.js only serves auth routes (signin, signup, reset-password, etc.)
+// No store initialization needed here — session sync happens in the Vite SPA after login.
+const AuthProvider = ({ children }: PropsWithChildren) => {
+  return <>{children}</>;
+};
 
 export default AuthProvider;

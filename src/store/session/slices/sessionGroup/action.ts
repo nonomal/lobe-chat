@@ -1,54 +1,63 @@
-import { StateCreator } from 'zustand/vanilla';
+import { toast } from '@lobehub/ui/base-ui';
+import { t } from 'i18next';
 
 import { sessionService } from '@/services/session';
-import { SessionStore } from '@/store/session';
-import { SessionGroupItem } from '@/types/session';
+import { type SessionStore } from '@/store/session';
+import { type StoreSetter } from '@/store/types';
+import { type SessionGroupItem } from '@/types/session';
 
-export interface SessionGroupAction {
-  addSessionGroup: (name: string) => Promise<string>;
-  clearSessionGroups: () => Promise<void>;
-  removeSessionGroup: (id: string) => Promise<void>;
-  updateSessionGroupId: (sessionId: string, groupId: string) => Promise<void>;
-  updateSessionGroupName: (id: string, name: string) => Promise<void>;
-  updateSessionGroupSort: (items: SessionGroupItem[]) => Promise<void>;
-}
+import { type SessionGroupsDispatch } from './reducer';
+import { sessionGroupsReducer } from './reducer';
 
-export const createSessionGroupSlice: StateCreator<
-  SessionStore,
-  [['zustand/devtools', never]],
-  [],
-  SessionGroupAction
-> = (set, get) => ({
-  addSessionGroup: async (name) => {
+type Setter = StoreSetter<SessionStore>;
+export const createSessionGroupSlice = (set: Setter, get: () => SessionStore, _api?: unknown) =>
+  new SessionGroupActionImpl(set, get, _api);
+
+export class SessionGroupActionImpl {
+  readonly #get: () => SessionStore;
+
+  constructor(set: Setter, get: () => SessionStore, _api?: unknown) {
+    void _api;
+    void set;
+    this.#get = get;
+  }
+
+  addSessionGroup = async (name: string): Promise<string> => {
     const id = await sessionService.createSessionGroup(name);
 
-    await get().refreshSessions();
+    await this.#get().refreshSessions();
 
     return id;
-  },
+  };
 
-  clearSessionGroups: async () => {
-    await sessionService.clearSessionGroups();
-    await get().refreshSessions();
-  },
-
-  removeSessionGroup: async (id) => {
+  removeSessionGroup = async (id: string): Promise<void> => {
     await sessionService.removeSessionGroup(id);
-    await get().refreshSessions();
-  },
-  updateSessionGroupId: async (sessionId, groupId) => {
-    await sessionService.updateSessionGroupId(sessionId, groupId);
+    await this.#get().refreshSessions();
+  };
 
-    await get().refreshSessions();
-  },
-
-  updateSessionGroupName: async (id, name) => {
+  updateSessionGroupName = async (id: string, name: string): Promise<void> => {
     await sessionService.updateSessionGroup(id, { name });
-    await get().refreshSessions();
-  },
-  updateSessionGroupSort: async (items) => {
+    await this.#get().refreshSessions();
+  };
+
+  updateSessionGroupSort = async (items: SessionGroupItem[]): Promise<void> => {
     const sortMap = items.map((item, index) => ({ id: item.id, sort: index }));
+
+    this.#get().internal_dispatchSessionGroups({ sortMap, type: 'updateSessionGroupOrder' });
+
+    const loadingToast = toast.loading(t('sessionGroup.sorting', { ns: 'chat' }));
+
     await sessionService.updateSessionGroupOrder(sortMap);
-    await get().refreshSessions();
-  },
-});
+    loadingToast.close();
+    toast.success(t('sessionGroup.sortSuccess', { ns: 'chat' }));
+
+    await this.#get().refreshSessions();
+  };
+
+  internal_dispatchSessionGroups = (payload: SessionGroupsDispatch): void => {
+    const nextSessionGroups = sessionGroupsReducer(this.#get().sessionGroups, payload);
+    this.#get().internal_processSessions(this.#get().sessions, nextSessionGroups);
+  };
+}
+
+export type SessionGroupAction = Pick<SessionGroupActionImpl, keyof SessionGroupActionImpl>;

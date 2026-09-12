@@ -1,34 +1,34 @@
-import useSWR, { SWRResponse } from 'swr';
-import { StateCreator } from 'zustand/vanilla';
+import { type SWRResponse } from 'swr';
 
+import { useClientDataSWR } from '@/libs/swr';
+import { fileKeys } from '@/libs/swr/keys';
 import { fileService } from '@/services/file';
-import { FilePreview } from '@/types/files';
+import { type StoreSetter } from '@/store/types';
+import { type FileItem } from '@/types/files';
 
-import { FileStore } from '../../store';
+import { type FileStore } from '../../store';
 
-export interface TTSFileAction {
-  removeTTSFile: (id: string) => Promise<void>;
+type Setter = StoreSetter<FileStore>;
+export const createTTSFileSlice = (set: Setter, get: () => FileStore, _api?: unknown) =>
+  new TTSFileActionImpl(set, get, _api);
 
-  uploadTTSByArrayBuffers: (
+export class TTSFileActionImpl {
+  readonly #get: () => FileStore;
+
+  constructor(set: Setter, get: () => FileStore, _api?: unknown) {
+    void _api;
+    void set;
+    this.#get = get;
+  }
+
+  removeTTSFile = async (id: string): Promise<void> => {
+    await fileService.removeFile(id);
+  };
+
+  uploadTTSByArrayBuffers = async (
     messageId: string,
     arrayBuffers: ArrayBuffer[],
-  ) => Promise<string | undefined>;
-
-  uploadTTSFile: (file: File) => Promise<string | undefined>;
-
-  useFetchTTSFile: (id: string | null) => SWRResponse<FilePreview>;
-}
-
-export const createTTSFileSlice: StateCreator<
-  FileStore,
-  [['zustand/devtools', never]],
-  [],
-  TTSFileAction
-> = (_, get) => ({
-  removeTTSFile: async (id) => {
-    await fileService.removeFile(id);
-  },
-  uploadTTSByArrayBuffers: async (messageId, arrayBuffers) => {
+  ): Promise<string | undefined> => {
     const fileType = 'audio/mp3';
     const blob = new Blob(arrayBuffers, { type: fileType });
     const fileName = `${messageId}.mp3`;
@@ -37,24 +37,15 @@ export const createTTSFileSlice: StateCreator<
       type: fileType,
     };
     const file = new File([blob], fileName, fileOptions);
-    return get().uploadTTSFile(file);
-  },
-  uploadTTSFile: async (file) => {
-    try {
-      const data = await fileService.uploadFile({
-        createdAt: file.lastModified,
-        data: await file.arrayBuffer(),
-        fileType: file.type,
-        name: file.name,
-        saveMode: 'local',
-        size: file.size,
-      });
 
-      return data.id;
-    } catch (error) {
-      // 提示用户上传失败
-      console.error('upload error:', error);
-    }
-  },
-  useFetchTTSFile: (id) => useSWR(id, fileService.getFile),
-});
+    const res = await this.#get().uploadWithProgress({ file, skipCheckFileType: true });
+
+    return res?.id;
+  };
+
+  useFetchTTSFile = (id: string | null): SWRResponse<FileItem> => {
+    return useClientDataSWR(!!id ? fileKeys.ttsFile(id) : null, () => fileService.getFile(id!));
+  };
+}
+
+export type TTSFileAction = Pick<TTSFileActionImpl, keyof TTSFileActionImpl>;

@@ -1,16 +1,16 @@
-import { LobeChatPluginMeta } from '@lobehub/chat-plugin-sdk';
+import { type LobeTool } from '@lobechat/types';
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { pluginService } from '@/services/plugin';
-import { LobeTool } from '@/types/tool';
+import { merge } from '@/utils/merge';
 
 import { useToolStore } from '../../store';
 
 vi.mock('@/services/plugin', () => ({
   pluginService: {
+    getInstalledPlugins: vi.fn().mockResolvedValue([]),
     updatePluginSettings: vi.fn(),
-    removeAllPlugins: vi.fn(),
   },
 }));
 
@@ -21,60 +21,15 @@ beforeEach(() => {
 
 describe('useToolStore:plugin', () => {
   describe('checkPluginsIsInstalled', () => {
-    it('should not perform any operations if the plugin list is empty', async () => {
-      const installPluginsMock = vi.fn();
-      useToolStore.setState({
-        loadPluginStore: vi.fn(),
-        installPlugins: installPluginsMock,
-      });
-
+    it('should be deprecated and do nothing', async () => {
+      // Old plugin system has been deprecated
       const { result } = renderHook(() => useToolStore());
 
       await act(async () => {
-        await result.current.checkPluginsIsInstalled([]);
+        await result.current.checkPluginsIsInstalled(['plugin1', 'plugin2']);
       });
 
-      expect(installPluginsMock).not.toHaveBeenCalled();
-    });
-
-    it('should load the plugin store and install plugins if necessary', async () => {
-      const plugins = ['plugin1', 'plugin2'];
-      const loadPluginStoreMock = vi.fn();
-      const installPluginsMock = vi.fn();
-      useToolStore.setState({
-        loadPluginStore: loadPluginStoreMock,
-        installPlugins: installPluginsMock,
-      });
-
-      const { result } = renderHook(() => useToolStore());
-
-      await act(async () => {
-        await result.current.checkPluginsIsInstalled(plugins);
-      });
-
-      expect(loadPluginStoreMock).toHaveBeenCalled();
-      expect(installPluginsMock).toHaveBeenCalledWith(plugins);
-    });
-
-    it('should not load the plugin store and install plugins', async () => {
-      const plugins = ['plugin1', 'plugin2'];
-      const loadPluginStoreMock = vi.fn();
-      const installPluginsMock = vi.fn();
-      useToolStore.setState({
-        loadPluginStore: loadPluginStoreMock,
-        installPlugins: installPluginsMock,
-        installedPlugins: [{ identifier: 'abc' }] as LobeTool[],
-        pluginStoreList: [{ identifier: 'abc' }] as LobeChatPluginMeta[],
-      });
-
-      const { result } = renderHook(() => useToolStore());
-
-      await act(async () => {
-        await result.current.checkPluginsIsInstalled(plugins);
-      });
-
-      expect(loadPluginStoreMock).not.toHaveBeenCalled();
-      expect(installPluginsMock).toHaveBeenCalledWith(plugins);
+      // Should not call any methods since old plugin system is deprecated
     });
   });
 
@@ -89,19 +44,33 @@ describe('useToolStore:plugin', () => {
         await result.current.updatePluginSettings(pluginId, newSettings);
       });
 
-      expect(pluginService.updatePluginSettings).toBeCalledWith(pluginId, newSettings);
+      expect(pluginService.updatePluginSettings).toBeCalledWith(
+        pluginId,
+        newSettings,
+        expect.any(AbortSignal),
+      );
     });
-  });
 
-  describe('removeAllPlugins', () => {
-    it('should reset all plugin settings', () => {
-      const { result } = renderHook(() => useToolStore());
-
-      act(() => {
-        result.current.removeAllPlugins();
+    it('should merge settings for a plugin with existing settings', async () => {
+      const pluginId = 'test-plugin';
+      const existingSettings = { setting1: 'old-value', setting2: 'old-value' };
+      const newSettings = { setting1: 'new-value' };
+      const mergedSettings = merge(existingSettings, newSettings);
+      useToolStore.setState({
+        installedPlugins: [{ identifier: pluginId, settings: existingSettings }] as LobeTool[],
       });
 
-      expect(pluginService.removeAllPlugins).toBeCalled();
+      const { result } = renderHook(() => useToolStore());
+
+      await act(async () => {
+        await result.current.updatePluginSettings(pluginId, newSettings);
+      });
+
+      expect(pluginService.updatePluginSettings).toBeCalledWith(
+        pluginId,
+        mergedSettings,
+        expect.any(AbortSignal),
+      );
     });
   });
 

@@ -1,125 +1,214 @@
-import { LobeChatPluginManifest } from '@lobehub/chat-plugin-sdk';
-import { uniqBy } from 'lodash-es';
-import { Md5 } from 'ts-md5';
+import { getBuiltinRenderDisplayControl } from '@lobechat/builtin-tools/displayControls';
+import { getComposioAppByIdentifier, getLobehubSkillProviderById } from '@lobechat/const';
+import { type RenderDisplayControl, type ToolManifest } from '@lobechat/types';
 
-import { PLUGIN_SCHEMA_API_MD5_PREFIX, PLUGIN_SCHEMA_SEPARATOR } from '@/const/plugin';
-import { MetaData } from '@/types/meta';
-import { ChatCompletionTool } from '@/types/openai/chat';
-import { LobeToolMeta } from '@/types/tool/tool';
+import {
+  isInstalledPluginAvailableInCurrentEnv,
+  isToolAvailableInCurrentEnv,
+} from '@/helpers/toolAvailability';
+import { type MetaData } from '@/types/meta';
+import { type LobeToolMeta } from '@/types/tool/tool';
 
-import { pluginHelpers } from '../helpers';
-import { ToolStoreState } from '../initialState';
+import { type ToolStoreState } from '../initialState';
 import { builtinToolSelectors } from '../slices/builtin/selectors';
+import { ComposioServerStatus } from '../slices/composioStore';
+import { lobehubSkillStoreSelectors } from '../slices/lobehubSkillStore';
+import { LobehubSkillStatus } from '../slices/lobehubSkillStore/types';
 import { pluginSelectors } from '../slices/plugin/selectors';
-
-const getAPIName = (identifier: string, name: string, type?: string) => {
-  const pluginType = type && type !== 'default' ? `${PLUGIN_SCHEMA_SEPARATOR + type}` : '';
-
-  // 将插件的 identifier 作为前缀，避免重复
-  let apiName = identifier + PLUGIN_SCHEMA_SEPARATOR + name + pluginType;
-
-  // OpenAI GPT function_call name can't be longer than 64 characters
-  // So we need to use md5 to shorten the name
-  // and then find the correct apiName in response by md5
-  if (apiName.length >= 64) {
-    const md5Content = PLUGIN_SCHEMA_API_MD5_PREFIX + Md5.hashStr(name).toString();
-
-    apiName = identifier + PLUGIN_SCHEMA_SEPARATOR + md5Content + pluginType;
-  }
-
-  return apiName;
-};
-
-const enabledSchema =
-  (tools: string[] = []) =>
-  (s: ToolStoreState): ChatCompletionTool[] => {
-    const list = pluginSelectors
-      .installedPluginManifestList(s)
-      .concat(s.builtinTools.map((b) => b.manifest as LobeChatPluginManifest))
-      // 如果存在 enabledPlugins，那么只启用 enabledPlugins 中的插件
-      .filter((m) => tools.includes(m?.identifier))
-      .flatMap((manifest) =>
-        manifest.api.map((m) => ({
-          ...m,
-          name: getAPIName(manifest.identifier, m.name, manifest.type),
-        })),
-      );
-
-    return uniqBy(list, 'name').map((i) => ({ function: i, type: 'function' }));
-  };
-
-const enabledSystemRoles =
-  (tools: string[] = []) =>
-  (s: ToolStoreState) => {
-    const toolsSystemRole = pluginSelectors
-      .installedPluginManifestList(s)
-      .concat(s.builtinTools.map((b) => b.manifest as LobeChatPluginManifest))
-      // 如果存在 enabledPlugins，那么只启用 enabledPlugins 中的插件
-      .filter((m) => tools.includes(m?.identifier))
-      .map((manifest) => {
-        if (!manifest) return '';
-
-        const meta = manifest.meta || {};
-
-        const title = pluginHelpers.getPluginTitle(meta) || manifest.identifier;
-        const systemRole = manifest.systemRole || pluginHelpers.getPluginDesc(meta);
-
-        const methods = manifest.api
-          .map((m) =>
-            [`#### ${getAPIName(manifest.identifier, m.name, manifest.type)}`, m.description].join(
-              '\n\n',
-            ),
-          )
-          .join('\n\n');
-
-        return [`### ${title}`, systemRole, 'The APIs you can use:', methods].join('\n\n');
-      })
-      .filter(Boolean);
-
-    if (toolsSystemRole.length > 0) {
-      return ['## Tools', 'You can use these tools below:', ...toolsSystemRole]
-        .filter(Boolean)
-        .join('\n\n');
-    }
-
-    return '';
-  };
 
 const metaList = (s: ToolStoreState): LobeToolMeta[] => {
   const pluginList = pluginSelectors.installedPluginMetaList(s) as LobeToolMeta[];
+  const lobehubSkillList = lobehubSkillStoreSelectors.metaList(s) as LobeToolMeta[];
 
-  return builtinToolSelectors.metaList(s).concat(pluginList);
+  return builtinToolSelectors.metaList(s).concat(pluginList).concat(lobehubSkillList);
+};
+
+/**
+ * All installed discoverable tools across every source (builtins, plugins, skills).
+ * Excludes only tools with `discoverable: false` (pure infrastructure / internal).
+ * Includes hidden and runtime-managed builtins (web-browsing, memory, cloud-sandbox, etc.)
+ * that `metaList` hides from the chat toolbar.
+ */
+const discoverableMetaList = (s: ToolStoreState): LobeToolMeta[] => {
+  const pluginList = pluginSelectors.installedPluginMetaList(s) as LobeToolMeta[];
+  const lobehubSkillList = lobehubSkillStoreSelectors.metaList(s) as LobeToolMeta[];
+
+  return builtinToolSelectors.discoverableMetaList(s).concat(pluginList).concat(lobehubSkillList);
 };
 
 const getMetaById =
   (id: string) =>
-  (s: ToolStoreState): MetaData | undefined =>
-    metaList(s).find((m) => m.identifier === id)?.meta;
+  (s: ToolStoreState): MetaData | undefined => {
+    const item = metaList(s).find((m) => m.identifier === id);
+
+    if (!item) return;
+
+    if (item.meta) return item.meta;
+
+    return {
+      avatar: item?.avatar,
+      backgroundColor: item?.backgroundColor,
+      description: item?.description,
+      title: item?.title,
+    };
+  };
 
 const getManifestById =
   (id: string) =>
-  (s: ToolStoreState): LobeChatPluginManifest | undefined =>
+  (s: ToolStoreState): ToolManifest | undefined =>
     pluginSelectors
       .installedPluginManifestList(s)
-      .concat(s.builtinTools.map((b) => b.manifest as LobeChatPluginManifest))
+      .concat(s.builtinTools.map((b) => b.manifest as ToolManifest))
       .find((i) => i.identifier === id);
 
-// 获取插件 manifest 加载状态
+// Get plugin manifest loading status
 const getManifestLoadingStatus = (id: string) => (s: ToolStoreState) => {
   const manifest = getManifestById(id)(s);
 
   if (s.pluginInstallLoading[id]) return 'loading';
+
+  if (s.pluginInstallErrors[id]) return 'error';
 
   if (!manifest) return 'error';
 
   if (!!manifest) return 'success';
 };
 
+const getPluginInstallError = (id: string) => (s: ToolStoreState) => s.pluginInstallErrors[id];
+
+const isToolHasUI = (id: string) => (s: ToolStoreState) => {
+  const manifest = getManifestById(id)(s);
+  if (!manifest) return false;
+  const builtinTool = s.builtinTools.find((tool) => tool.identifier === id);
+
+  if (builtinTool && builtinTool.type === 'builtin') {
+    return true;
+  }
+
+  return !!manifest.ui;
+};
+
+/**
+ * Get the renderDisplayControl configuration for a specific tool API
+ * Only works for builtin tools, plugins don't support this feature yet
+ * @param identifier - Tool identifier
+ * @param apiName - API name
+ * @param pluginState - The tool_result's plugin state, for APIs whose display
+ *   control depends on what the result carries (e.g. CC `Read` renders a
+ *   thumbnail for an image and source text for anything else). Undefined while
+ *   the call is still in flight.
+ * @returns RenderDisplayControl value, defaults to 'collapsed'
+ */
+const getRenderDisplayControl =
+  (identifier: string, apiName: string, pluginState?: unknown) =>
+  (s: ToolStoreState): RenderDisplayControl => {
+    const builtinTool = s.builtinTools.find((t) => t.identifier === identifier);
+    const manifestControl = builtinTool?.manifest.api.find(
+      (a) => a.name === apiName,
+    )?.renderDisplayControl;
+    if (manifestControl) return manifestControl;
+
+    // Fallback for packages that don't ship a LobeChat manifest (e.g. Claude Code —
+    // its tools come from Anthropic tool_use blocks at runtime).
+    return getBuiltinRenderDisplayControl(identifier, apiName, pluginState) ?? 'collapsed';
+  };
+
+export interface AvailableToolForDiscovery {
+  description: string;
+  identifier: string;
+  name: string;
+}
+
+/**
+ * Get all tools available for tool discovery (activateTools).
+ * Built from raw state to avoid inheriting unrelated filtering logic.
+ *
+ * Sources:
+ * 1. Builtin tools (from s.builtinTools) — exclude non-discoverable, skills, platform-unavailable
+ * 2. User-installed plugins (from s.installedPlugins) — exclude Composio/LobeHub Skill/agent skill overlap
+ * 3. Composio MCP servers (connected) — description from COMPOSIO_APP_TYPES
+ * 4. LobeHub Skill servers (connected) — description from LOBEHUB_SKILL_PROVIDERS
+ */
+const availableToolsForDiscovery = (s: ToolStoreState): AvailableToolForDiscovery[] => {
+  // Build exclusion sets for deduplication
+  const builtinSkillIds = new Set((s.builtinSkills || []).map((skill) => skill.identifier));
+  const agentSkillIds = new Set((s.agentSkills || []).map((skill) => skill.identifier));
+  const composioIds = new Set((s.composioServers || []).map((server) => server.identifier));
+  const lobehubSkillIds = new Set((s.lobehubSkillServers || []).map((server) => server.identifier));
+
+  // 1. Builtin tools — directly from s.builtinTools
+  const builtinItems = s.builtinTools
+    .filter((tool) => tool.discoverable !== false)
+    .filter((tool) => !builtinSkillIds.has(tool.identifier))
+    .filter((tool) => isToolAvailableInCurrentEnv(tool.identifier))
+    .map((tool) => ({
+      description: tool.description || '',
+      identifier: tool.identifier,
+      name: tool.title || tool.identifier,
+    }));
+
+  // 2. User-installed plugins — directly from s.installedPlugins
+  //    Exclude Composio, LobeHub Skill, and agent skill entries (they are handled in dedicated sources)
+  const pluginItems = s.installedPlugins
+    .filter((p) => !composioIds.has(p.identifier))
+    .filter((p) => !lobehubSkillIds.has(p.identifier))
+    .filter((p) => !agentSkillIds.has(p.identifier))
+    .filter((p) => !p.customParams?.composio) // extra safety for Composio plugins
+    .filter((plugin) => isInstalledPluginAvailableInCurrentEnv(plugin))
+    .map((plugin) => {
+      const meta = plugin.manifest?.meta;
+      return {
+        description: meta?.description || '',
+        identifier: plugin.identifier,
+        name: meta?.title || plugin.identifier,
+      };
+    });
+
+  // 3. Composio MCP servers (connected only)
+  const composioItems = (s.composioServers || [])
+    .filter((server) => server.status === ComposioServerStatus.ACTIVE && server.tools?.length)
+    // A connector identifier can have legacy Composio and current LobeHub
+    // connections at the same time. Tool discovery is identifier-based, so the
+    // canonical LobeHub connection must own the single visible entry.
+    .filter(
+      (server) =>
+        !s.lobehubSkillServers?.some(
+          (item) =>
+            item.identifier === server.identifier && item.status === LobehubSkillStatus.CONNECTED,
+        ),
+    )
+    .map((server) => {
+      const config = getComposioAppByIdentifier(server.identifier);
+      return {
+        description: config?.description || '',
+        identifier: server.identifier,
+        name: config?.label || server.label,
+      };
+    });
+
+  // 4. LobeHub Skill servers (connected only)
+  const lobehubSkillItems = (s.lobehubSkillServers || [])
+    .filter((server) => server.status === LobehubSkillStatus.CONNECTED)
+    .map((server) => {
+      const config = getLobehubSkillProviderById(server.identifier);
+      return {
+        description: config?.description || '',
+        identifier: server.identifier,
+        name: config?.label || server.name,
+      };
+    });
+
+  return [...builtinItems, ...pluginItems, ...composioItems, ...lobehubSkillItems];
+};
+
 export const toolSelectors = {
-  enabledSchema,
-  enabledSystemRoles,
+  availableToolsForDiscovery,
+  discoverableMetaList,
   getManifestById,
   getManifestLoadingStatus,
+  getPluginInstallError,
   getMetaById,
+  getRenderDisplayControl,
+  isToolHasUI,
   metaList,
 };

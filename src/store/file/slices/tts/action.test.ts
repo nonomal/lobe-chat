@@ -1,26 +1,10 @@
-import { act, renderHook } from '@testing-library/react';
-import useSWR from 'swr';
-import { Mock, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fileService } from '@/services/file';
+import { createServerConfigStore } from '@/store/serverConfig/store';
 
 import { useFileStore as useStore } from '../../store';
-
-vi.mock('zustand/traditional');
-
-// Mocks for fileService
-vi.mock('@/services/file', () => ({
-  fileService: {
-    removeFile: vi.fn(),
-    uploadFile: vi.fn(),
-    getFile: vi.fn(),
-  },
-}));
-
-// Mock for useSWR
-vi.mock('swr', () => ({
-  default: vi.fn(),
-}));
 
 //  mock the arrayBuffer
 beforeAll(() => {
@@ -36,6 +20,8 @@ beforeAll(() => {
       });
     },
   });
+
+  createServerConfigStore();
 });
 
 beforeEach(() => {
@@ -49,45 +35,13 @@ describe('TTSFileAction', () => {
     const fileId = 'tts-file-id';
 
     // Mock the fileService.removeFile to resolve
-    (fileService.removeFile as Mock).mockResolvedValue(undefined);
+    vi.spyOn(fileService, 'removeFile').mockResolvedValue(undefined);
 
     await act(async () => {
       await useStore.getState().removeTTSFile(fileId);
     });
 
     expect(fileService.removeFile).toHaveBeenCalledWith(fileId);
-  });
-
-  // Test for uploadTTSFile
-  it('uploadTTSFile should upload the file and return the file id', async () => {
-    const testFile = new File(['content'], 'test.mp3', { type: 'audio/mp3' });
-    const uploadedFileData = {
-      id: 'new-tts-file-id',
-      createdAt: testFile.lastModified,
-      data: await testFile.arrayBuffer(),
-      fileType: testFile.type,
-      name: testFile.name,
-      saveMode: 'local',
-      size: testFile.size,
-    };
-
-    // Mock the fileService.uploadFile to resolve with uploadedFileData
-    (fileService.uploadFile as Mock).mockResolvedValue(uploadedFileData);
-
-    let fileId;
-    await act(async () => {
-      fileId = await useStore.getState().uploadTTSFile(testFile);
-    });
-
-    expect(fileService.uploadFile).toHaveBeenCalledWith({
-      createdAt: testFile.lastModified,
-      data: await testFile.arrayBuffer(),
-      fileType: testFile.type,
-      name: testFile.name,
-      saveMode: 'local',
-      size: testFile.size,
-    });
-    expect(fileId).toBe(uploadedFileData.id);
   });
 
   // Test for uploadTTSByArrayBuffers
@@ -99,8 +53,8 @@ describe('TTSFileAction', () => {
 
     // Spy on uploadTTSFile to simulate a successful upload
     const uploadTTSFileSpy = vi
-      .spyOn(useStore.getState(), 'uploadTTSFile')
-      .mockResolvedValue('new-tts-file-id');
+      .spyOn(useStore.getState(), 'uploadWithProgress')
+      .mockResolvedValue({ id: 'new-tts-file-id', url: '1' });
 
     let fileId;
     await act(async () => {
@@ -115,7 +69,7 @@ describe('TTSFileAction', () => {
   });
 
   // Test for useFetchTTSFile
-  it('useFetchTTSFile should call useSWR and return file data', async () => {
+  it('useFetchTTSFile should fetch and return file data', async () => {
     const fileId = 'tts-file-id';
     const fileData = {
       id: fileId,
@@ -127,19 +81,13 @@ describe('TTSFileAction', () => {
     };
 
     // Mock the fileService.getFile to resolve with fileData
-    (fileService.getFile as Mock).mockResolvedValue(fileData);
-
-    // Mock useSWR to call the fetcher function immediately
-    const useSWRMock = vi.mocked(useSWR);
-    useSWRMock.mockImplementation(((key: string, fetcher: any) => {
-      const data = fetcher(key);
-      return { data, error: undefined, isValidating: false, mutate: vi.fn() };
-    }) as any);
+    vi.spyOn(fileService, 'getFile').mockResolvedValue(fileData as any);
 
     const { result } = renderHook(() => useStore.getState().useFetchTTSFile(fileId));
 
-    await act(async () => {
-      await result.current.data;
+    // Wait for SWR to fetch data
+    await waitFor(() => {
+      expect(result.current.data).toEqual(fileData);
     });
 
     expect(fileService.getFile).toHaveBeenCalledWith(fileId);

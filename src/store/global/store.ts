@@ -1,53 +1,44 @@
-import { PersistOptions, devtools, persist, subscribeWithSelector } from 'zustand/middleware';
+import { subscribeWithSelector } from 'zustand/middleware';
 import { shallow } from 'zustand/shallow';
 import { createWithEqualityFn } from 'zustand/traditional';
-import { StateCreator } from 'zustand/vanilla';
+import { type StateCreator } from 'zustand/vanilla';
 
-import { isDev } from '@/utils/env';
+import { createDevtools } from '../middleware/createDevtools';
+import { expose } from '../middleware/expose';
+import { flattenActions } from '../utils/flattenActions';
+import { type GlobalGeneralAction } from './actions/general';
+import { generalActionSlice } from './actions/general';
+import { type GlobalWorkspacePaneAction } from './actions/workspacePane';
+import { globalWorkspaceSlice } from './actions/workspacePane';
+import { createNavigationRef, type GlobalState, initialState } from './initialState';
 
-import { createHyperStorage } from '../middleware/createHyperStorage';
-import { type GlobalState, initialState } from './initialState';
-import { type CommonAction, createCommonSlice } from './slices/common/action';
-import { type PreferenceAction, createPreferenceSlice } from './slices/preference/action';
-import { type SettingsAction, createSettingsSlice } from './slices/settings/action';
+//  ===============  Aggregate createStoreFn ============ //
 
-//  ===============  聚合 createStoreFn ============ //
+export interface GlobalStore extends GlobalState, GlobalWorkspacePaneAction, GlobalGeneralAction {
+  /* empty */
+}
 
-export type GlobalStore = CommonAction & GlobalState & SettingsAction & PreferenceAction;
+type GlobalStoreAction = GlobalWorkspacePaneAction & GlobalGeneralAction;
 
-const createStore: StateCreator<GlobalStore, [['zustand/devtools', never]]> = (...parameters) => ({
+const createStore: StateCreator<GlobalStore, [['zustand/devtools', never]]> = (
+  ...parameters: Parameters<StateCreator<GlobalStore, [['zustand/devtools', never]]>>
+) => ({
   ...initialState,
-  ...createCommonSlice(...parameters),
-  ...createSettingsSlice(...parameters),
-  ...createPreferenceSlice(...parameters),
+  // Own ref instance so nested `.current` writes never mutate exported `initialState.navigationRef`
+  navigationRef: createNavigationRef(),
+  ...flattenActions<GlobalStoreAction>([
+    globalWorkspaceSlice(...parameters),
+    generalActionSlice(...parameters),
+  ]),
 });
 
-//  ===============  persist 本地缓存中间件配置 ============ //
-type GlobalPersist = Pick<GlobalStore, 'preference' | 'settings'>;
+//  ===============  Implement useStore ============ //
 
-const persistOptions: PersistOptions<GlobalStore, GlobalPersist> = {
-  name: 'LOBE_GLOBAL',
-
-  skipHydration: true,
-
-  storage: createHyperStorage({
-    localStorage: {
-      dbName: 'LobeHub',
-      selectors: ['preference'],
-    },
-  }),
-};
-
-//  ===============  实装 useStore ============ //
+const devtools = createDevtools('global');
 
 export const useGlobalStore = createWithEqualityFn<GlobalStore>()(
-  persist(
-    subscribeWithSelector(
-      devtools(createStore, {
-        name: 'LobeChat_Global' + (isDev ? '_DEV' : ''),
-      }),
-    ),
-    persistOptions,
-  ),
+  subscribeWithSelector(devtools(createStore)),
   shallow,
 );
+
+expose('global', useGlobalStore);

@@ -1,10 +1,10 @@
 import { Analytics } from '@vercel/analytics/react';
 import { memo } from 'react';
 
-import { getServerConfig } from '@/config/server';
+interface VercelAnalyticsProps {
+  debug?: boolean;
+}
 
-const { VERCEL_DEBUG } = getServerConfig();
-
-const VercelAnalytics = memo(() => <Analytics debug={VERCEL_DEBUG} />);
+const VercelAnalytics = memo<VercelAnalyticsProps>(({ debug }) => <Analytics debug={debug} />);
 
 export default VercelAnalytics;

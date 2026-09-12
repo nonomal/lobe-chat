@@ -1,38 +1,23 @@
-import {
-  AZURE_OPENAI_API_VERSION,
-  LOBE_CHAT_ACCESS_CODE,
-  OPENAI_API_KEY_HEADER_KEY,
-  OPENAI_END_POINT,
-  USE_AZURE_OPENAI,
-} from '@/const/fetch';
-import { useGlobalStore } from '@/store/global';
-import { modelProviderSelectors, settingsSelectors } from '@/store/global/selectors';
+import { LOBE_USER_ID, OPENAI_API_KEY_HEADER_KEY, OPENAI_END_POINT } from '@/const/fetch';
+import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
+import { useUserStore } from '@/store/user';
 
 /**
  * TODO: Need to be removed after tts refactor
  * @deprecated
  */
-// eslint-disable-next-line no-undef
+ 
 export const createHeaderWithOpenAI = (header?: HeadersInit): HeadersInit => {
-  const openai = modelProviderSelectors.openAIConfig(useGlobalStore.getState());
+  const state = useUserStore.getState();
 
-  const apiKey = openai.OPENAI_API_KEY || '';
-  const endpoint = openai.endpoint || '';
+  const keyVaults: Record<string, any> =
+    aiProviderSelectors.providerKeyVaults('openai')(useAiInfraStore.getState()) || {};
 
-  // eslint-disable-next-line no-undef
-  const result: HeadersInit = {
+   
+  return {
     ...header,
-    [LOBE_CHAT_ACCESS_CODE]: settingsSelectors.password(useGlobalStore.getState()),
-    [OPENAI_API_KEY_HEADER_KEY]: apiKey,
-    [OPENAI_END_POINT]: endpoint,
+    [LOBE_USER_ID]: state.user?.id || '',
+    [OPENAI_API_KEY_HEADER_KEY]: keyVaults.apiKey || '',
+    [OPENAI_END_POINT]: keyVaults.baseURL || '',
   };
-
-  if (openai.useAzure) {
-    Object.assign(result, {
-      [AZURE_OPENAI_API_VERSION]: openai.azureApiVersion || '',
-      [USE_AZURE_OPENAI]: '1',
-    });
-  }
-
-  return result;
 };

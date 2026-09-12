@@ -1,18 +1,23 @@
-import dynamic from 'next/dynamic';
+import { type PropsWithChildren } from 'react';
 import { memo } from 'react';
 
-import { useGlobalStore } from '@/store/global';
-import { modelProviderSelectors } from '@/store/global/selectors';
-import { useSessionStore } from '@/store/session';
-import { agentSelectors } from '@/store/session/selectors';
+import { useModelHasContextWindowToken } from '@/hooks/useModelHasContextWindowToken';
+import dynamic from '@/libs/next/dynamic';
 
 const LargeTokenContent = dynamic(() => import('./TokenTag'), { ssr: false });
 
-const Token = memo(() => {
-  const model = useSessionStore(agentSelectors.currentAgentModel);
-  const showTag = useGlobalStore(modelProviderSelectors.modelHasMaxToken(model));
+const Token = memo<PropsWithChildren>(({ children }) => {
+  const showTag = useModelHasContextWindowToken();
 
-  return showTag && <LargeTokenContent />;
+  return showTag && children;
 });
 
-export default Token;
+const ContextWindow = () => {
+  return (
+    <Token>
+      <LargeTokenContent />
+    </Token>
+  );
+};
+
+export default ContextWindow;

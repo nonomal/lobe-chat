@@ -1,14 +1,29 @@
-import { GoogleAnalytics as GA } from '@next/third-parties/google';
+'use client';
 
-import { getServerConfig } from '@/config/server';
+import { memo, useEffect } from 'react';
 
-const { GOOGLE_ANALYTICS_MEASUREMENT_ID, ENABLE_GOOGLE_ANALYTICS } = getServerConfig();
+interface GoogleAnalyticsProps {
+  gaId?: string;
+}
 
-if (ENABLE_GOOGLE_ANALYTICS && !GOOGLE_ANALYTICS_MEASUREMENT_ID)
-  throw new Error(
-    'You have enable the google analytics but not provided the google analytics id. Please provide the google analytics id in your env',
-  );
+const GoogleAnalytics = memo<GoogleAnalyticsProps>(({ gaId }) => {
+  useEffect(() => {
+    if (!gaId) return;
 
-const GoogleAnalytics = () => <GA gaId={GOOGLE_ANALYTICS_MEASUREMENT_ID!} />;
+    const script = document.createElement('script');
+    script.src = `https://www.googletagmanager.com/gtag/js?id=${gaId}`;
+    script.async = true;
+    document.head.appendChild(script);
+
+    (window as any).dataLayer = (window as any).dataLayer || [];
+    function gtag(...args: any[]) {
+      (window as any).dataLayer.push(args);
+    }
+    gtag('js', new Date());
+    gtag('config', gaId);
+  }, [gaId]);
+
+  return null;
+});
 
 export default GoogleAnalytics;
